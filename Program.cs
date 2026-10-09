@@ -51,14 +51,22 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Sigurno čitanje konekcijskog stringa za PostgreSQL bazu
-string? connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-                         ?? Environment.GetEnvironmentVariable("DATABASE_URL")
-                         ?? Environment.GetEnvironmentVariable("POSTGRES_URL")
-                         ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
+// ------------------------------------------------------------------
+// Čitanje konekcijskog stringa za PostgreSQL bazu
+// ------------------------------------------------------------------
+// VAŽNO: Koristimo IsNullOrWhiteSpace umjesto "??", jer "??" preskače samo null,
+// a ne i prazan string (appsettings.json ima "DefaultConnection": "").
+// ConnectionStrings__DefaultConnection env varijabla se već automatski
+// učitava kroz builder.Configuration.GetConnectionString(...).
+string? connectionString = new[]
+{
+    builder.Configuration.GetConnectionString("DefaultConnection"),
+    Environment.GetEnvironmentVariable("DATABASE_URL"),
+    Environment.GetEnvironmentVariable("POSTGRES_URL"),
+}.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
 
-// Fallback: Ako varijabla još nije učitana kao URL, sastavi je iz Railway PostgreSQL varijabli
-if (string.IsNullOrEmpty(connectionString))
+// Fallback: sastavi string iz pojedinačnih Railway PostgreSQL varijabli
+if (string.IsNullOrWhiteSpace(connectionString))
 {
     var pgHost = Environment.GetEnvironmentVariable("PGHOST");
     var pgPort = Environment.GetEnvironmentVariable("PGPORT") ?? "5432";
@@ -66,30 +74,40 @@ if (string.IsNullOrEmpty(connectionString))
     var pgPass = Environment.GetEnvironmentVariable("PGPASSWORD");
     var pgDb   = Environment.GetEnvironmentVariable("PGDATABASE");
 
-    if (!string.IsNullOrEmpty(pgHost) && !string.IsNullOrEmpty(pgUser))
+    if (!string.IsNullOrWhiteSpace(pgHost) && !string.IsNullOrWhiteSpace(pgUser))
     {
         connectionString = $"Host={pgHost};Port={pgPort};Username={pgUser};Password={pgPass};Database={pgDb};";
     }
 }
 
-// Konverzija URL formata (postgres:// ili postgresql://) u standardni ADO.NET Npgsql format
-if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
+// Konverzija URL formata (postgres:// ili postgresql://) u standardni Npgsql format
+if (!string.IsNullOrWhiteSpace(connectionString) &&
+    (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
 {
     var databaseUri = new Uri(connectionString);
-    var userInfo = databaseUri.UserInfo.Split(':');
-    var user = userInfo.Length > 0 ? userInfo[0] : "";
-    var password = userInfo.Length > 1 ? userInfo[1] : "";
+
+    // Split(':', 2) da lozinka koja sadrži ':' ne bude odsječena;
+    // UnescapeDataString za specijalne znakove u korisniku/lozinci.
+    var userInfo = databaseUri.UserInfo.Split(':', 2);
+    var user = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : "";
+    var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
     var port = databaseUri.Port > 0 ? databaseUri.Port : 5432;
     var database = databaseUri.LocalPath.TrimStart('/');
 
-    connectionString = $"Host={databaseUri.Host};Port={port};Username={user};Password={password};Database={database};Ssl Mode=Prefer;";
+    connectionString = $"Host={databaseUri.Host};Port={port};Username={user};Password={password};Database={database};Ssl Mode=Prefer;Trust Server Certificate=true;";
 }
 
 // Ako konekcijski string i dalje nije pronađen, postavi fallback da se aplikacija ne ruši pri startu
-if (string.IsNullOrEmpty(connectionString))
+if (string.IsNullOrWhiteSpace(connectionString))
 {
     Console.WriteLine("UPOZORENJE: Connection string nije pronađen u varijablama okruženja!");
     connectionString = "Host=localhost;Database=dummy;Username=dummy;Password=dummy;";
+}
+else
+{
+    // Ispisuje samo host/bazu (bez lozinke) radi lakšeg debugiranja na Railwayu
+    var csb = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+    Console.WriteLine($"Baza: Host={csb.Host}; Port={csb.Port}; Database={csb.Database}");
 }
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
