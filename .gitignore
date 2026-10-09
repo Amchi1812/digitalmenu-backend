@@ -1,0 +1,15 @@
+# Tajne postavke
+appsettings.Development.json
+appsettings.Production.json
+
+
+# Build & Temp
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# Uploads
+wwwroot/uploads/

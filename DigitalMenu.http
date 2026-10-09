@@ -1,0 +1,6 @@
+@DigitalMenu_HostAddress = http://localhost:5237
+
+GET {{DigitalMenu_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
