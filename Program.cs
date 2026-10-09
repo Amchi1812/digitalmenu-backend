@@ -51,13 +51,42 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Povezivanje na PostgreSQL bazu (provjerava lokalni connection string ili Railway DATABASE_URL)
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+// Sigurno čitanje konekcijskog stringa za PostgreSQL bazu
+string? connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+                         ?? Environment.GetEnvironmentVariable("DATABASE_URL")
+                         ?? Environment.GetEnvironmentVariable("POSTGRES_URL");
+
+// Fallback: Ako varijabla još nije učitana kao URL, sastavi je iz Railway PostgreSQL varijabli
+if (string.IsNullOrEmpty(connectionString))
+{
+    var pgHost = Environment.GetEnvironmentVariable("PGHOST");
+    var pgPort = Environment.GetEnvironmentVariable("PGPORT") ?? "5432";
+    var pgUser = Environment.GetEnvironmentVariable("PGUSER");
+    var pgPass = Environment.GetEnvironmentVariable("PGPASSWORD");
+    var pgDb   = Environment.GetEnvironmentVariable("PGDATABASE");
+
+    if (!string.IsNullOrEmpty(pgHost) && !string.IsNullOrEmpty(pgUser))
+    {
+        connectionString = $"Host={pgHost};Port={pgPort};Username={pgUser};Password={pgPass};Database={pgDb};";
+    }
+}
+
+// Konverzija URL formata (postgres:// ili postgresql://) u standardni ADO.NET Npgsql format
+if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
+{
+    var databaseUri = new Uri(connectionString);
+    var userInfo = databaseUri.UserInfo.Split(':');
+    var user = userInfo.Length > 0 ? userInfo[0] : "";
+    var password = userInfo.Length > 1 ? userInfo[1] : "";
+    var port = databaseUri.Port > 0 ? databaseUri.Port : 5432;
+    var database = databaseUri.LocalPath.TrimStart('/');
+
+    connectionString = $"Host={databaseUri.Host};Port={port};Username={user};Password={password};Database={database};Ssl Mode=Prefer;";
+}
 
 if (string.IsNullOrEmpty(connectionString))
 {
-    throw new InvalidOperationException("Connection string nije pronađen u configuration fajlu niti u DATABASE_URL okruženju!");
+    throw new InvalidOperationException("Konekcijski string za bazu podataka nije pronađen u appsettings.json niti u okruženju (DATABASE_URL / ConnectionStrings__DefaultConnection).");
 }
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -79,14 +108,14 @@ builder.Services.AddScoped<IUserContextService, UserContextService>();
 // ==========================================
 // 2. KONFIGURACIJA JWT AUTHENTICATION-A
 // ==========================================
-var jwtSecret = builder.Configuration["Jwt:Secret"];
-var jwtIssuer = builder.Configuration["Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Jwt:Audience"];
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? Environment.GetEnvironmentVariable("Jwt__Secret");
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? Environment.GetEnvironmentVariable("Jwt__Issuer");
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? Environment.GetEnvironmentVariable("Jwt__Audience");
 
 // Validacija da JWT ključ sigurno postoji na startu aplikacije
 if (string.IsNullOrEmpty(jwtSecret))
 {
-    throw new InvalidOperationException("JWT Secret nije konfigurisan u appsettings.json ili varijablama okruženja!");
+    throw new InvalidOperationException("JWT Secret nije konfigurisan u appsettings.json ili varijablama okruženja (Jwt:Secret / Jwt__Secret)!");
 }
 
 builder.Services.AddAuthentication(options =>
