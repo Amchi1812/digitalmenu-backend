@@ -35,7 +35,6 @@ builder.Services.AddCors(options =>
 
                 var uri = new Uri(origin);
 
-                
                 if (uri.Host.EndsWith("vercel.app") || 
                     uri.Host.EndsWith("digitalmenu.com") || 
                     uri.Host == "localhost")
@@ -43,7 +42,6 @@ builder.Services.AddCors(options =>
                     return true;
                 }
 
-                
                 return true;
             })
             .AllowAnyHeader()
@@ -53,9 +51,17 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Povezivanje na PostgreSQL bazu
+// Povezivanje na PostgreSQL bazu (provjerava lokalni connection string ili Railway DATABASE_URL)
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+                    ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+
+if (string.IsNullOrEmpty(connectionString))
+{
+    throw new InvalidOperationException("Connection string nije pronađen u configuration fajlu niti u DATABASE_URL okruženju!");
+}
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(connectionString));
 
 // registracija aplikacijskih servisa
 builder.Services.AddScoped<IMenuService, MenuService>();
